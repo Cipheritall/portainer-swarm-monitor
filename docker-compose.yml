@@ -1,0 +1,139 @@
+version: "3.8"
+
+services:
+  grafana:
+    image: grafana/grafana:9.5.2
+    ports:
+      - target: 3000
+        published: 3000
+        protocol: tcp
+        mode: ingress
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.monitoring == true
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_LOKI_ENABLED=true
+      - GF_LOKI_URL=http://loki:3100
+    networks:
+      - net    
+
+  prometheus:
+    image: prom/prometheus:v2.44.0
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--log.level=error'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.monitoring == true
+    volumes:
+      - prometheus-data:/prometheus
+    networks:
+      - net
+
+  loki:
+    image: grafana/loki:2.9.3
+    ports:
+      - target: 3100
+        published: 3100
+        protocol: tcp
+        mode: ingress
+    command: -config.file=/etc/loki/local-config.yaml
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.monitoring == true
+    volumes:
+      - loki-data:/loki
+    networks:
+      - net
+
+  promtail:
+    image: grafana/promtail:2.9.3
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+    volumes:
+      - /var/log:/var/log:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /run/docker.sock:/run/docker.sock:ro
+    command:
+      - -config.file=/etc/promtail/promtail.yaml
+    configs:
+      - source: promtail_config
+        target: /etc/promtail/promtail.yaml
+    networks:
+      - net
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    command: -logtostderr -docker_only
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro                        
+    networks:
+      - net
+
+  node-exporter:
+    image: prom/node-exporter:v1.5.0
+    command:
+      - '--path.sysfs=/host/sys'
+      - '--path.procfs=/host/proc'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--no-collector.ipvs'
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    volumes:
+      - /:/rootfs:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    networks:
+      - net
+
+volumes:
+  grafana-data:
+  prometheus-data:
+  loki-data:
+
+configs:
+  promtail_config:
+    file: ./promtail.yaml
+
+networks:
+  net:
+    driver: overlay
