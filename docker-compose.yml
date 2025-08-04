@@ -1,5 +1,6 @@
 version: "3.8"
-
+# REQUIREMETS :
+# Secrets : RK_password
 services:
   grafana:
     image: grafana/grafana:9.5.2
